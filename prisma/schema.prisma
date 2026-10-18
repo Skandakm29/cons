@@ -1,0 +1,332 @@
+// BuildBid data model.
+// Money is stored as whole rupees (Int). Areas are in square feet.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  HOMEOWNER
+  BUILDER
+  ADMIN
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum Package {
+  BASIC
+  STANDARD
+  PREMIUM
+  LUXURY
+}
+
+enum Facing {
+  NORTH
+  EAST
+  SOUTH
+  WEST
+  NORTH_EAST
+  NORTH_WEST
+  SOUTH_EAST
+  SOUTH_WEST
+}
+
+enum ProjectStatus {
+  DRAFT
+  OPEN
+  UNDER_REVIEW
+  AWARDED
+  CLOSED
+  CANCELLED
+}
+
+enum BidStatus {
+  SUBMITTED
+  SHORTLISTED
+  REJECTED
+  AWARDED
+  WITHDRAWN
+}
+
+enum DemoType {
+  PORTFOLIO
+  DESIGN_LINK
+  VIDEO
+  IMAGES
+}
+
+enum NotificationType {
+  PROJECT_PUBLISHED
+  BID_RECEIVED
+  BID_UPDATED
+  BID_WITHDRAWN
+  BID_SHORTLISTED
+  BID_REJECTED
+  BID_AWARDED
+  PROJECT_AWARDED
+  PROJECT_CANCELLED
+  BIDDING_CLOSED
+  NEW_MESSAGE
+  BUILDER_VERIFIED
+  BUILDER_REJECTED
+  REVIEW_RECEIVED
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String   @unique
+  email     String?  @unique
+  role      Role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  builderProfile BuilderProfile?
+  projects       Project[]       @relation("HomeownerProjects")
+  messages       Message[]
+  reviewsWritten Review[]        @relation("HomeownerReviews")
+  notifications  Notification[]
+
+  @@index([role])
+}
+
+// One-time passwords for phone login. Only a hash of the code is stored.
+model OtpCode {
+  id        String   @id @default(cuid())
+  phone     String
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([phone, createdAt])
+}
+
+model BuilderProfile {
+  id                     String             @id @default(cuid())
+  userId                 String             @unique
+  companyName            String
+  yearsOfExperience      Int
+  citiesServed           String[]
+  gstNumber              String?
+  licenseDocUrl          String?
+  about                  String?
+  verificationStatus     VerificationStatus @default(PENDING)
+  verificationNote       String?
+  verifiedAt             DateTime?
+  avgRating              Float              @default(0)
+  ratingCount            Int                @default(0)
+  completedProjectsCount Int                @default(0)
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  portfolio PortfolioItem[]
+  bids      Bid[]
+  reviews   Review[]
+
+  @@index([verificationStatus])
+}
+
+model PortfolioItem {
+  id            String   @id @default(cuid())
+  builderId     String
+  title         String
+  city          String
+  areaSqft      Int
+  imageUrls     String[]
+  description   String?
+  completedYear Int
+  createdAt     DateTime @default(now())
+
+  builder BuilderProfile @relation(fields: [builderId], references: [id], onDelete: Cascade)
+
+  @@index([builderId])
+}
+
+model Project {
+  id                String        @id @default(cuid())
+  homeownerId       String
+  title             String
+  city              String
+  locality          String
+  plotLengthFt      Int
+  plotWidthFt       Int
+  plotAreaSqft      Int
+  builtUpAreaSqft   Int
+  // Number of above-ground storeys: 1 = G, 2 = G+1, 3 = G+2 ...
+  floors            Int
+  bedrooms          Int
+  bathrooms         Int
+  parking           Boolean       @default(false)
+  facing            Facing
+  vastuRequired     Boolean       @default(false)
+  preferredPackage  Package
+  // Extras requested by the homeowner (feed the estimator).
+  extraBasement     Boolean       @default(false)
+  extraLift         Boolean       @default(false)
+  extraCompoundWall Boolean       @default(false)
+  extraSump         Boolean       @default(false)
+  extraSolar        Boolean       @default(false)
+  budgetMin         Int
+  budgetMax         Int
+  startTimeline     String
+  notes             String?
+  status            ProjectStatus @default(DRAFT)
+  publishedAt       DateTime?
+  bidDeadline       DateTime?
+  awardedBidId      String?       @unique
+  awardedAt         DateTime?
+  moderationNote    String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  homeowner  User       @relation("HomeownerProjects", fields: [homeownerId], references: [id], onDelete: Cascade)
+  estimates  Estimate[]
+  bids       Bid[]      @relation("ProjectBids")
+  awardedBid Bid?       @relation("AwardedBid", fields: [awardedBidId], references: [id])
+  messages   Message[]
+  review     Review?
+
+  @@index([homeownerId])
+  @@index([status, bidDeadline])
+  @@index([city, status])
+}
+
+model Estimate {
+  id              String   @id @default(cuid())
+  projectId       String
+  package         Package
+  ratePerSqftLow  Int
+  ratePerSqftHigh Int
+  totalLow        Int
+  totalHigh       Int
+  // EstimateBreakdown: categories with percent and rupee amounts, plus extras.
+  breakdown       Json
+  // RecommendedPlan: package suggestion, timeline weeks, payment milestones.
+  recommendedPlan Json
+  createdAt       DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+}
+
+model Bid {
+  id                   String    @id @default(cuid())
+  projectId            String
+  builderId            String
+  totalPrice           Int
+  breakdown            Json
+  timelineWeeks        Int
+  materialsSpec        Json
+  warrantyYears        Int
+  paymentMilestones    Json
+  demoType             DemoType
+  demoUrls             String[]
+  demoPortfolioItemIds String[]
+  coverNote            String
+  status               BidStatus @default(SUBMITTED)
+  revisionCount        Int       @default(0)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  project    Project        @relation("ProjectBids", fields: [projectId], references: [id], onDelete: Cascade)
+  builder    BuilderProfile @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  awardedFor Project?       @relation("AwardedBid")
+  revisions  BidRevision[]
+  messages   Message[]
+
+  // One bid record per builder per project. Withdrawn bids are reactivated on resubmission.
+  @@unique([projectId, builderId])
+  @@index([builderId, status])
+  @@index([projectId, status])
+}
+
+// Snapshot of a bid's previous values, written every time the bid is edited.
+model BidRevision {
+  id                String   @id @default(cuid())
+  bidId             String
+  revisionNumber    Int
+  totalPrice        Int
+  breakdown         Json
+  timelineWeeks     Int
+  materialsSpec     Json
+  warrantyYears     Int
+  paymentMilestones Json
+  demoType          DemoType
+  demoUrls          String[]
+  coverNote         String
+  createdAt         DateTime @default(now())
+
+  bid Bid @relation(fields: [bidId], references: [id], onDelete: Cascade)
+
+  @@unique([bidId, revisionNumber])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  projectId String
+  bidId     String
+  senderId  String
+  body      String
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  bid     Bid     @relation(fields: [bidId], references: [id], onDelete: Cascade)
+  sender  User    @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([bidId, createdAt])
+}
+
+model Review {
+  id          String   @id @default(cuid())
+  projectId   String   @unique
+  builderId   String
+  homeownerId String
+  rating      Int
+  comment     String?
+  createdAt   DateTime @default(now())
+
+  project   Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  builder   BuilderProfile @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  homeowner User           @relation("HomeownerReviews", fields: [homeownerId], references: [id], onDelete: Cascade)
+
+  @@index([builderId])
+}
+
+model EstimatorRate {
+  id                String   @id @default(cuid())
+  city              String
+  package           Package
+  ratePerSqftLow    Int
+  ratePerSqftHigh   Int
+  // Record<BreakdownCategory, number>; values sum to 100.
+  breakdownPercents Json
+  updatedAt         DateTime @updatedAt
+
+  @@unique([city, package])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  payload   Json
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read, createdAt])
+}

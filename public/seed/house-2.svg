@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 260" role="img" aria-label="Completed house illustration 2">
+  <rect width="400" height="260" fill="#d8e6f0"/>
+  <rect y="210" width="400" height="50" fill="#2d5b7a" opacity="0.25"/>
+  <rect x="72" y="90" width="192" height="120" fill="#fff" stroke="#2d5b7a" stroke-width="4"/>
+  <rect x="72" y="76" width="192" height="14" fill="#2d5b7a"/>
+  <rect x="102" y="120" width="34" height="34" fill="#d8e6f0" stroke="#2d5b7a" stroke-width="3"/>
+  <rect x="158" y="120" width="34" height="34" fill="#d8e6f0" stroke="#2d5b7a" stroke-width="3"/>
+  <rect x="204" y="150" width="30" height="60" fill="#2d5b7a"/>
+  <rect x="280" y="130" width="80" height="80" fill="#fff" stroke="#2d5b7a" stroke-width="4" opacity="1"/>
+  <circle cx="340" cy="50" r="22" fill="#2d5b7a" opacity="0.35"/>
+</svg>

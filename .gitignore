@@ -1,0 +1,11 @@
+node_modules
+.next
+out
+.env
+.env.local
+.pgdata
+public/uploads/*
+!public/uploads/.gitkeep
+*.tsbuildinfo
+next-env.d.ts
+coverage
