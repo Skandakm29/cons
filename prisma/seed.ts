@@ -63,11 +63,11 @@ async function main() {
     }));
 
   console.log("Seeding users…");
-  await prisma.user.create({ data: { name: "Asha (Admin)", phone: "9000000000", role: "ADMIN", email: "admin@buildbid.test" } });
+  await prisma.user.create({ data: { name: "Asha (Admin)", phone: "9000000000", phoneVerified: true, role: "ADMIN", email: "admin@buildbid.test" } });
   const [priya, rahul, meera] = await Promise.all([
-    prisma.user.create({ data: { name: "Priya Sharma", phone: "9000000001", role: "HOMEOWNER" } }),
-    prisma.user.create({ data: { name: "Rahul Gowda", phone: "9000000002", role: "HOMEOWNER" } }),
-    prisma.user.create({ data: { name: "Meera Iyer", phone: "9000000003", role: "HOMEOWNER" } }),
+    prisma.user.create({ data: { name: "Priya Sharma", email: "priya@buildbid.test", phoneVerified: true, phone: "9000000001", role: "HOMEOWNER" } }),
+    prisma.user.create({ data: { name: "Rahul Gowda", email: "rahul@buildbid.test", phoneVerified: true, phone: "9000000002", role: "HOMEOWNER" } }),
+    prisma.user.create({ data: { name: "Meera Iyer", email: "meera@buildbid.test", phoneVerified: true, phone: "9000000003", role: "HOMEOWNER" } }),
   ]);
 
   const builderSeeds = [
@@ -85,7 +85,9 @@ async function main() {
   };
   const builders: SeededBuilder[] = [];
   for (const [i, b] of builderSeeds.entries()) {
-    const user = await prisma.user.create({ data: { name: b.name, phone: b.phone, role: "BUILDER" } });
+    const user = await prisma.user.create({
+      data: { name: b.name, phone: b.phone, phoneVerified: true, email: `builder${i + 1}@buildbid.test`, role: "BUILDER" },
+    });
     const profile = await prisma.builderProfile.create({
       data: {
         userId: user.id,

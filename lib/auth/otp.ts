@@ -1,6 +1,7 @@
 import { createHash, randomInt, timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { BUSINESS_RULES } from "@/lib/config";
+import { getEmailSender, otpEmail, type EmailSender } from "./email";
 
 type Env = Record<string, string | undefined>;
 
@@ -148,23 +149,18 @@ export function acceptsTestCode(phone: string, code: string, env: Env = process.
   return code === TEST_CODE && (isDevBypass(env) || isTestNumber(phone, env));
 }
 
-function hashCode(phone: string, code: string): string {
+function hashCode(identifier: string, code: string): string {
   return createHash("sha256")
-    .update(`${phone}:${code}:${process.env.NEXTAUTH_SECRET ?? ""}`)
+    .update(`${identifier}:${code}:${process.env.NEXTAUTH_SECRET ?? ""}`)
     .digest("hex");
 }
 
 const RESEND_COOLDOWN_MS = 30_000;
 
-export async function requestOtp(phone: string, provider: AnyOtpProvider = getOtpProvider()): Promise<void> {
-  // Test numbers use the fixed test code; never spend an SMS on them.
-  if (isTestNumber(phone)) return;
-  if (provider.name === "mock" && process.env.NODE_ENV === "production") {
-    throw new OtpError("SMS login isn't switched on yet. Please try again later.");
-  }
-
+/** Cooldown and hourly cap per phone/email, so nobody can run up SMS or email bills. */
+async function assertCanIssue(identifier: string, kind: "number" | "email"): Promise<void> {
   const recent = await prisma.otpCode.findMany({
-    where: { phone, createdAt: { gt: new Date(Date.now() - 60 * 60_000) } },
+    where: { identifier, createdAt: { gt: new Date(Date.now() - 60 * 60_000) } },
     orderBy: { createdAt: "desc" },
     select: { createdAt: true },
   });
@@ -172,44 +168,98 @@ export async function requestOtp(phone: string, provider: AnyOtpProvider = getOt
     throw new OtpError("Please wait 30 seconds before requesting another code");
   }
   if (recent.length >= BUSINESS_RULES.otpMaxPerHour) {
-    throw new OtpError("Too many codes requested for this number. Please try again in an hour.");
+    throw new OtpError(`Too many codes requested for this ${kind}. Please try again in an hour.`);
   }
+}
 
-  if (provider.hosted) {
-    // The provider owns the code; we still record the request for rate limiting.
-    await prisma.otpCode.create({ data: { phone, codeHash: "hosted", expiresAt: new Date(), consumed: true } });
-    await provider.start(phone);
-    return;
-  }
-
+/** Stores a hashed one-time code and returns the plain code for delivery. */
+async function issueCode(identifier: string): Promise<string> {
   const code = randomInt(0, 1_000_000).toString().padStart(6, "0");
   await prisma.otpCode.create({
     data: {
-      phone,
-      codeHash: hashCode(phone, code),
+      identifier,
+      codeHash: hashCode(identifier, code),
       expiresAt: new Date(Date.now() + BUSINESS_RULES.otpTtlMinutes * 60_000),
     },
   });
-  await provider.send(phone, code);
+  return code;
 }
 
-/** Returns true if the code is valid; consumes it on success. */
-export async function verifyOtp(phone: string, code: string, provider: AnyOtpProvider = getOtpProvider()): Promise<boolean> {
-  if (acceptsTestCode(phone, code)) return true;
-  if (provider.hosted) return provider.check(phone, code);
-
+/** Checks the latest live code for `identifier`; consumes it on success, counts a failed attempt otherwise. */
+async function checkStoredCode(identifier: string, code: string): Promise<boolean> {
   const otp = await prisma.otpCode.findFirst({
-    where: { phone, consumed: false, expiresAt: { gt: new Date() } },
+    where: { identifier, consumed: false, expiresAt: { gt: new Date() } },
     orderBy: { createdAt: "desc" },
   });
   if (!otp || otp.attempts >= BUSINESS_RULES.otpMaxAttempts) return false;
 
   const expected = Buffer.from(otp.codeHash, "hex");
-  const actual = Buffer.from(hashCode(phone, code), "hex");
+  const actual = Buffer.from(hashCode(identifier, code), "hex");
   const ok = expected.length === actual.length && timingSafeEqual(expected, actual);
   await prisma.otpCode.update({
     where: { id: otp.id },
     data: ok ? { consumed: true } : { attempts: { increment: 1 } },
   });
   return ok;
+}
+
+// ---------------------------------------------------------------------------
+// Phone (SMS)
+// ---------------------------------------------------------------------------
+
+/** SMS login is offered only when a real SMS provider is configured (always in local dev). */
+export function isSmsEnabled(env: Env = process.env): boolean {
+  return env.NODE_ENV !== "production" || (env.OTP_PROVIDER ?? "mock") !== "mock";
+}
+
+export async function requestOtp(phone: string, provider: AnyOtpProvider = getOtpProvider()): Promise<void> {
+  // Test numbers use the fixed test code; never spend an SMS on them.
+  if (isTestNumber(phone)) return;
+  if (provider.name === "mock" && process.env.NODE_ENV === "production") {
+    throw new OtpError("SMS login isn't switched on yet. Please use email or Google instead.");
+  }
+  await assertCanIssue(phone, "number");
+
+  if (provider.hosted) {
+    // The provider owns the code; we still record the request for rate limiting.
+    await prisma.otpCode.create({ data: { identifier: phone, codeHash: "hosted", expiresAt: new Date(), consumed: true } });
+    await provider.start(phone);
+    return;
+  }
+  await provider.send(phone, await issueCode(phone));
+}
+
+/** Returns true if the code is valid; consumes it on success. */
+export async function verifyOtp(phone: string, code: string, provider: AnyOtpProvider = getOtpProvider()): Promise<boolean> {
+  if (acceptsTestCode(phone, code)) return true;
+  if (provider.hosted) return provider.check(phone, code);
+  return checkStoredCode(phone, code);
+}
+
+// ---------------------------------------------------------------------------
+// Email
+// ---------------------------------------------------------------------------
+
+/** Local development with the mock email sender accepts the test code for every address. */
+export function isEmailDevBypass(env: Env = process.env): boolean {
+  return env.NODE_ENV !== "production" && (env.EMAIL_PROVIDER ?? "mock") === "mock";
+}
+
+export async function requestEmailOtp(email: string, sender: EmailSender = getEmailSender()): Promise<void> {
+  if (sender.name === "mock" && process.env.NODE_ENV === "production") {
+    throw new OtpError("Email login isn't switched on yet. Please try again later.");
+  }
+  await assertCanIssue(email, "email");
+  const code = await issueCode(email);
+  try {
+    await sender.send(otpEmail(email, code));
+  } catch (e) {
+    console.error("[otp:email] send failed", e);
+    throw new OtpError("Couldn't send the email. Please check the address and try again.");
+  }
+}
+
+export async function verifyEmailOtp(email: string, code: string): Promise<boolean> {
+  if (isEmailDevBypass() && code === TEST_CODE) return true;
+  return checkStoredCode(email, code);
 }

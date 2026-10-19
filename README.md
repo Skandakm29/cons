@@ -33,19 +33,27 @@ npm run dev                     # http://localhost:3000
 
 ### Demo logins
 
-In development, every phone number accepts the OTP **`123456`**. A real random code is also printed to the server console.
+In development, every email and phone number accepts the code **`123456`**. A real random code is also printed to the server console. Log in by email (the default) or switch to **Use mobile number instead**.
 
-| Role | Name | Phone | What to try |
-|---|---|---|---|
-| Admin | Asha | `9000000000` | Verify the pending builder, edit rates, moderate |
-| Homeowner | Priya Sharma | `9000000001` | Whitefield project (OPEN, 3 bids incl. an unusually low one) → **Compare**; JP Nagar project (UNDER_REVIEW) |
-| Homeowner | Rahul Gowda | `9000000002` | HSR project (AWARDED, builder contact unlocked, reviewed) |
-| Homeowner | Meera Iyer | `9000000003` | Mysuru project (OPEN, 1 bid) and a DRAFT to publish |
-| Builder (verified) | Namma Mane Constructions | `9100000001` | Shortlisted bid with revision history; chat |
-| Builder (verified) | Sthapathi Builders | `9100000002` | Serves Bengaluru + Mysuru |
-| Builder (verified) | UrbanNest Homes | `9100000003` | Unusually low bid |
-| Builder (verified) | Shilpa Premium Villas | `9100000004` | Won the HSR project |
-| Builder (pending) | Coastal Build Co. | `9100000005` | Can browse but not bid until verified |
+| Role | Name | Email | Phone | What to try |
+|---|---|---|---|---|
+| Admin | Asha | `admin@buildbid.test` | `9000000000` | Verify the pending builder, edit rates, moderate |
+| Homeowner | Priya Sharma | `priya@buildbid.test` | `9000000001` | Whitefield project (OPEN, 3 bids incl. an unusually low one) → **Compare**; JP Nagar project (UNDER_REVIEW) |
+| Homeowner | Rahul Gowda | `rahul@buildbid.test` | `9000000002` | HSR project (AWARDED, builder contact unlocked, reviewed) |
+| Homeowner | Meera Iyer | `meera@buildbid.test` | `9000000003` | Mysuru project (OPEN, 1 bid) and a DRAFT to publish |
+| Builder (verified) | Namma Mane Constructions | `builder1@buildbid.test` | `9100000001` | Shortlisted bid with revision history; chat |
+| Builder (verified) | Sthapathi Builders | `builder2@buildbid.test` | `9100000002` | Serves Bengaluru + Mysuru |
+| Builder (verified) | UrbanNest Homes | `builder3@buildbid.test` | `9100000003` | Unusually low bid |
+| Builder (verified) | Shilpa Premium Villas | `builder4@buildbid.test` | `9100000004` | Won the HSR project |
+| Builder (pending) | Coastal Build Co. | `builder5@buildbid.test` | `9100000005` | Can browse but not bid until verified |
+
+### How login works
+
+- **Google** ("Continue with Google"): first-time users then add a phone number and choose homeowner or builder.
+- **Email code** (the default): a 6-digit code is emailed. Signup also asks for a mobile number, which is shared with the other party after an award. It is *not* SMS-verified, so it can't be used for SMS login.
+- **Phone code (SMS)**: shown once an SMS provider is configured. Only numbers confirmed by SMS (`phoneVerified`) can log in this way.
+
+Each email or phone number gets at most one code per 30 seconds and 5 per hour.
 
 ## Deploying to Vercel + Neon
 
@@ -87,8 +95,22 @@ This never deletes anything. It adds any missing placeholder rates and creates t
 
 > Never run `npm run seed` against production: it wipes all data and creates demo accounts with public phone numbers. It refuses to run against a non-local database unless `ALLOW_DEMO_SEED=1` is set.
 
-### 6. Switch on SMS (before inviting real users)
-Pick one, set its variables, then redeploy:
+### 6. Switch on login for real users
+Each option is independent. Set its variables, then redeploy.
+
+**Email codes (free).** Gmail works without owning a domain:
+1. On the Google account you'll send from, turn on 2-Step Verification, then create an **App password** at myaccount.google.com/apppasswords.
+2. Set `EMAIL_PROVIDER=smtp`, `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, `SMTP_USER=you@gmail.com` and `SMTP_PASS=<the 16-character app password>`.
+3. Gmail allows about 500 emails a day. Once you own a domain, switch the same settings to Resend, Brevo or Zoho SMTP for better deliverability.
+
+**Google sign-in (free).**
+1. At console.cloud.google.com, create a project. Go to **APIs & Services → OAuth consent screen**: choose External, fill in the app name and support email, then click **Publish app**. Basic email/profile scopes need no Google review.
+2. Go to **Credentials → Create credentials → OAuth client ID → Web application**. Add the authorised redirect URI `https://<your-domain>/api/auth/callback/google`.
+3. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. The button appears once both are set.
+
+To let your admin log in this way, re-run `seed:prod` with `ADMIN_EMAIL=you@gmail.com` (plus the same `ADMIN_PHONE`). It adds the email to the existing admin account.
+
+**SMS codes (paid per message).** Pick one:
 - **Twilio Verify** (fastest to start; Twilio handles Indian DLT compliance): create a Verify Service in the Twilio console, then set `OTP_PROVIDER=twilio`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and `TWILIO_VERIFY_SERVICE_SID`.
 - **MSG91** (cheaper per SMS): register your sender ID and OTP template on DLT, then set `OTP_PROVIDER=msg91`, `MSG91_AUTH_KEY`, `MSG91_TEMPLATE_ID` and `MSG91_OTP_VAR` (the variable name in your template, default `otp`).
 
@@ -168,6 +190,7 @@ Package ₹/sqft rates and breakdown percentages exist only in the `EstimatorRat
 
 | Interface | Location | Current | Replace with |
 |---|---|---|---|
+| `EmailSender` | `lib/auth/email.ts` | `mock` (console), `smtp` via `EMAIL_PROVIDER` | Any SMTP service, or an HTTP API sender |
 | `OtpProvider` | `lib/auth/otp.ts` | `mock` (console), `twilio` (Twilio Verify), `msg91` via `OTP_PROVIDER` | Add more providers by implementing `OtpProvider` or `HostedOtpProvider` |
 | `StorageService` | `lib/services/storage.ts` | `local` → `public/uploads`, `vercel-blob` via `STORAGE_PROVIDER` | S3 / Cloudinary |
 | `NotificationChannel` | `lib/services/notifications.ts` | `InAppChannel` (DB) | Add SMS / WhatsApp channels alongside |
@@ -187,6 +210,7 @@ Where the brief was ambiguous, I chose the simplest sensible option:
 - **Chat** is per bid and refreshes every 15 s (no websockets yet).
 - **Uploads**: JPG/PNG/WebP (images) and PDF (licence documents only), up to 4 MB (Vercel rejects request bodies over 4.5 MB), type-checked by magic bytes. Builders and admins can upload; homeowners have nothing to upload yet. Local dev writes to `public/uploads`; production uses Vercel Blob.
 - **Admin** accounts can't be created through signup; they are seeded.
+- **Unverified contact numbers**: a number entered at email or Google signup isn't SMS-verified but is still unique. Someone could register another person's number, blocking that person from signing up with it. Verifying numbers by SMS once SMS is cheap enough would close this.
 - **ESLint** isn't installed in the base version (`next build` still type-checks).
 
 ## Next steps

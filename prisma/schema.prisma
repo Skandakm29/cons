@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   url       = env("DATABASE_URL")
   // Unpooled connection for migrations (Neon). Locally it's the same as DATABASE_URL.
   directUrl = env("DATABASE_URL_UNPOOLED")
@@ -84,13 +84,16 @@ enum NotificationType {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  name      String
-  phone     String   @unique
-  email     String?  @unique
-  role      Role
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String   @id @default(cuid())
+  name          String
+  // Contact number, shared with the other party after an award.
+  phone         String   @unique
+  // True only when the number was confirmed by SMS OTP; SMS login requires it.
+  phoneVerified Boolean  @default(false)
+  email         String?  @unique
+  role          Role
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   builderProfile BuilderProfile?
   projects       Project[]       @relation("HomeownerProjects")
@@ -101,17 +104,17 @@ model User {
   @@index([role])
 }
 
-// One-time passwords for phone login. Only a hash of the code is stored.
+// One-time passwords. `identifier` is a 10-digit phone or a lowercase email. Only a hash of the code is stored.
 model OtpCode {
-  id        String   @id @default(cuid())
-  phone     String
-  codeHash  String
-  expiresAt DateTime
-  attempts  Int      @default(0)
-  consumed  Boolean  @default(false)
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  identifier String
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int      @default(0)
+  consumed   Boolean  @default(false)
+  createdAt  DateTime @default(now())
 
-  @@index([phone, createdAt])
+  @@index([identifier, createdAt])
 }
 
 model BuilderProfile {
