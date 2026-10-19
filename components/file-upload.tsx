@@ -87,7 +87,7 @@ export function FileUpload({
               {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Upload aria-hidden />} {label}
             </label>
           </Button>
-          <span className="ml-2 text-xs text-muted-foreground">Max 5 MB each</span>
+          <span className="ml-2 text-xs text-muted-foreground">Max 4 MB each</span>
         </div>
       )}
       {shown && <p className="text-xs font-medium text-destructive" role="alert">{shown}</p>}

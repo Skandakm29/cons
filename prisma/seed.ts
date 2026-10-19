@@ -4,33 +4,15 @@
  * Re-running wipes and recreates all data.
  */
 import { PrismaClient, type BidStatus, type DemoType, type Package, type Prisma } from "@prisma/client";
-import { calculateEstimate, defaultPaymentMilestones, distributeByPercents, type BreakdownPercents, type PackageRate } from "../lib/estimator";
+import { calculateEstimate, defaultPaymentMilestones, distributeByPercents, type PackageRate } from "../lib/estimator";
 import { estimateToCreateData, projectToEstimatorInput } from "../lib/services/estimates";
 import { toJson } from "../lib/json";
+import { PLACEHOLDER_RATES, splitFor } from "./rates";
+import { assertSafeToWipe } from "./guard";
 
 const prisma = new PrismaClient();
 const DAY = 24 * 60 * 60 * 1000;
 const daysFromNow = (d: number) => new Date(Date.now() + d * DAY);
-
-// ---------------------------------------------------------------------------
-// Estimator rates
-// TODO: replace with real market rates. These are PLACEHOLDER values for demo only.
-// ---------------------------------------------------------------------------
-const STANDARD_SPLIT: BreakdownPercents = {
-  foundation: 12, structure: 22, masonry: 10, plastering: 6, waterproofing: 3, plumbing: 7,
-  electrical: 7, flooring: 11, painting: 6, doorsWindows: 9, fixtures: 4, miscellaneous: 3,
-};
-const FINISH_HEAVY_SPLIT: BreakdownPercents = {
-  foundation: 11, structure: 19, masonry: 8, plastering: 6, waterproofing: 3, plumbing: 7,
-  electrical: 7, flooring: 13, painting: 7, doorsWindows: 10, fixtures: 6, miscellaneous: 3,
-};
-const PLACEHOLDER_RATES: Record<string, Record<Package, [number, number]>> = {
-  // TODO: replace with real market rates (₹ per sqft of built-up area).
-  Bengaluru: { BASIC: [1750, 1950], STANDARD: [2050, 2300], PREMIUM: [2400, 2750], LUXURY: [2950, 3600] },
-  // TODO: replace with real market rates.
-  Mysuru: { BASIC: [1600, 1800], STANDARD: [1900, 2150], PREMIUM: [2250, 2550], LUXURY: [2750, 3300] },
-};
-const splitFor = (p: Package) => (p === "PREMIUM" || p === "LUXURY" ? FINISH_HEAVY_SPLIT : STANDARD_SPLIT);
 
 const MATERIALS = {
   standard: {
@@ -51,6 +33,7 @@ const MATERIALS = {
 };
 
 async function main() {
+  assertSafeToWipe();
   console.log("Clearing existing data…");
   await prisma.notification.deleteMany();
   await prisma.message.deleteMany();

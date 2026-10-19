@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { put } from "@vercel/blob";
 
 export interface StoredFile {
   url: string;
@@ -38,11 +39,27 @@ export class LocalStorageService implements StorageService {
   }
 }
 
+/** Vercel Blob (public URLs). Needs BLOB_READ_WRITE_TOKEN, which Vercel adds when you connect a Blob store. */
+export class VercelBlobStorageService implements StorageService {
+  async save({ bytes, name, contentType, folder }: { bytes: Buffer; name: string; contentType: string; folder: string }) {
+    const ext = EXTENSIONS[contentType];
+    if (!ext) throw new Error(`Unsupported file type ${contentType}`);
+    const safeFolder = folder.replace(/[^a-z0-9-]/gi, "");
+    const blob = await put(`uploads/${safeFolder}/${randomUUID()}.${ext}`, bytes, {
+      access: "public",
+      contentType,
+      addRandomSuffix: false,
+    });
+    return { url: blob.url, name, size: bytes.length, contentType };
+  }
+}
+
 export function getStorage(): StorageService {
   switch (process.env.STORAGE_PROVIDER ?? "local") {
     case "local":
       return new LocalStorageService();
-    // case "s3": return new S3StorageService(...);
+    case "vercel-blob":
+      return new VercelBlobStorageService();
     default:
       throw new Error(`Unknown STORAGE_PROVIDER "${process.env.STORAGE_PROVIDER}"`);
   }

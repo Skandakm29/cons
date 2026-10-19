@@ -17,6 +17,8 @@ export const BUSINESS_RULES = {
   /** OTP validity window and max verification attempts. */
   otpTtlMinutes: 10,
   otpMaxAttempts: 5,
-  /** Upload limits. */
-  maxUploadBytes: 5 * 1024 * 1024,
+  /** Upload limit. Vercel functions reject request bodies over 4.5 MB, so stay under it. */
+  maxUploadBytes: 4 * 1024 * 1024,
+  /** OTP SMS cap per phone number per hour (limits SMS-pumping costs). */
+  otpMaxPerHour: 5,
 } as const;

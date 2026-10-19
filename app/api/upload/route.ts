@@ -21,7 +21,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid folder" }, { status: 400 });
   }
   if (file.size > BUSINESS_RULES.maxUploadBytes) {
-    return NextResponse.json({ error: "File must be 5 MB or smaller" }, { status: 413 });
+    return NextResponse.json({ error: "File must be 4 MB or smaller" }, { status: 413 });
   }
 
   const bytes = Buffer.from(await file.arrayBuffer());
@@ -33,6 +33,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Please upload an image" }, { status: 415 });
   }
 
-  const stored = await getStorage().save({ bytes, name: file.name, contentType, folder });
-  return NextResponse.json(stored);
+  try {
+    const stored = await getStorage().save({ bytes, name: file.name, contentType, folder });
+    return NextResponse.json(stored);
+  } catch (e) {
+    console.error("[upload] storage failed", e);
+    return NextResponse.json({ error: "Upload failed. Please try again." }, { status: 502 });
+  }
 }

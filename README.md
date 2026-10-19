@@ -47,15 +47,66 @@ In development, every phone number accepts the OTP **`123456`**. A real random c
 | Builder (verified) | Shilpa Premium Villas | `9100000004` | Won the HSR project |
 | Builder (pending) | Coastal Build Co. | `9100000005` | Can browse but not bid until verified |
 
+## Deploying to Vercel + Neon
+
+Every push to `main` deploys automatically. Each build runs `prisma migrate deploy` (the `vercel-build` script), so schema changes ship with the code. Functions run in Singapore (`vercel.json`), next to Neon's nearest region.
+
+### 1. Create the Vercel project
+1. On vercel.com, click **Add New → Project** and import the GitHub repo. Vercel detects Next.js automatically.
+2. The first deploy will fail because there's no database yet. That's expected.
+
+### 2. Add the database and file storage (Vercel → your project → **Storage**)
+1. **Create Database → Neon (Postgres)**. Pick the **Singapore** region and connect it to the project. This sets `DATABASE_URL` (pooled) and `DATABASE_URL_UNPOOLED` (direct, used for migrations).
+   - When connecting, tick **Production** only, or turn on Neon's per-preview branches. Otherwise preview deployments will write to your live database.
+2. **Create → Blob** and connect it to the project. This sets `BLOB_READ_WRITE_TOKEN`.
+
+### 3. Set environment variables (Settings → Environment Variables)
+
+| Variable | Value |
+|---|---|
+| `NEXTAUTH_URL` | Your site URL, e.g. `https://buildbid.vercel.app` (change it later if you add a custom domain) |
+| `NEXTAUTH_SECRET` | Output of `openssl rand -base64 32` (don't reuse the dev value) |
+| `STORAGE_PROVIDER` | `vercel-blob` |
+| `OTP_PROVIDER` | `mock` until you pick an SMS provider (see step 6) |
+| `OTP_TEST_NUMBERS` | Your own number(s), comma-separated. These can log in with `123456`. |
+
+With `OTP_PROVIDER=mock` in production, only the test numbers can log in. Everyone else sees "SMS login isn't switched on yet". That makes it a safe soft launch.
+
+### 4. Redeploy
+Go to **Deployments → ⋯ → Redeploy**. The build creates all the tables.
+
+### 5. Load the estimator rates and create your admin account (from your laptop, once)
+Copy the two connection strings from Vercel (Storage → your Neon database → `.env.local` tab), then run:
+
+```bash
+DATABASE_URL="<pooled url>" DATABASE_URL_UNPOOLED="<unpooled url>" \
+ADMIN_PHONE=98xxxxxxxx ADMIN_NAME="Your Name" npm run seed:prod
+```
+
+This never deletes anything. It adds any missing placeholder rates and creates the admin account, and is safe to re-run. Your admin number must be in `OTP_TEST_NUMBERS` to log in before SMS is set up. Then log in and **replace the placeholder rates at `/admin/rates`**.
+
+> Never run `npm run seed` against production: it wipes all data and creates demo accounts with public phone numbers. It refuses to run against a non-local database unless `ALLOW_DEMO_SEED=1` is set.
+
+### 6. Switch on SMS (before inviting real users)
+Pick one, set its variables, then redeploy:
+- **Twilio Verify** (fastest to start; Twilio handles Indian DLT compliance): create a Verify Service in the Twilio console, then set `OTP_PROVIDER=twilio`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and `TWILIO_VERIFY_SERVICE_SID`.
+- **MSG91** (cheaper per SMS): register your sender ID and OTP template on DLT, then set `OTP_PROVIDER=msg91`, `MSG91_AUTH_KEY`, `MSG91_TEMPLATE_ID` and `MSG91_OTP_VAR` (the variable name in your template, default `otp`).
+
+Trim `OTP_TEST_NUMBERS` down to just the numbers you still need. Each phone number can request at most 5 codes per hour, which limits SMS-pumping costs.
+
+### 7. Custom domain (optional)
+Go to **Settings → Domains**, add your domain, then update `NEXTAUTH_URL` and redeploy.
+
 ## Scripts
 
 | Command | Purpose |
 |---|---|
 | `npm run dev` / `build` / `start` | Next.js |
-| `npm test` | Unit tests (estimator, INR formatting, price bands). No DB needed. |
+| `npm test` | Unit tests (estimator, INR formatting, price bands, OTP providers). No DB needed. |
 | `npm run test:integration` | DB-backed tests that call the real server actions (posting, sealed bidding, revisions, award, chat redaction, reviews, deadline). Run `npm run seed` first. |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm run seed` | Reset demo data |
+| `npm run seed` | Reset demo data (local databases only) |
+| `npm run seed:prod` | Production-safe: add missing rates and create the admin from `ADMIN_PHONE` |
 | `npm run db:local` | Start a local Postgres without Docker |
 
 ## Folder structure
@@ -117,8 +168,8 @@ Package ₹/sqft rates and breakdown percentages exist only in the `EstimatorRat
 
 | Interface | Location | Current | Replace with |
 |---|---|---|---|
-| `OtpProvider` | `lib/auth/otp.ts` | `MockOtpProvider` (console) | MSG91 / Twilio Verify via `OTP_PROVIDER` |
-| `StorageService` | `lib/services/storage.ts` | `LocalStorageService` → `public/uploads` | S3 / Cloudinary via `STORAGE_PROVIDER` |
+| `OtpProvider` | `lib/auth/otp.ts` | `mock` (console), `twilio` (Twilio Verify), `msg91` via `OTP_PROVIDER` | Add more providers by implementing `OtpProvider` or `HostedOtpProvider` |
+| `StorageService` | `lib/services/storage.ts` | `local` → `public/uploads`, `vercel-blob` via `STORAGE_PROVIDER` | S3 / Cloudinary |
 | `NotificationChannel` | `lib/services/notifications.ts` | `InAppChannel` (DB) | Add SMS / WhatsApp channels alongside |
 
 ## Assumptions
@@ -134,14 +185,14 @@ Where the brief was ambiguous, I chose the simplest sensible option:
 - **Rejected bids** can be "reconsidered" by the homeowner while the project is still open or under review.
 - **Reviews**: one per project, allowed once the project is AWARDED. `avgRating` and `ratingCount` are recalculated on each review. Seeded builders also have pre-existing ratings.
 - **Chat** is per bid and refreshes every 15 s (no websockets yet).
-- **Uploads**: JPG/PNG/WebP (images) and PDF (licence documents only), up to 5 MB, type-checked by magic bytes. Builders and admins can upload; homeowners have nothing to upload yet. In production, `next start` won't serve files added to `public/` after the build, which is another reason to move to S3.
+- **Uploads**: JPG/PNG/WebP (images) and PDF (licence documents only), up to 4 MB (Vercel rejects request bodies over 4.5 MB), type-checked by magic bytes. Builders and admins can upload; homeowners have nothing to upload yet. Local dev writes to `public/uploads`; production uses Vercel Blob.
 - **Admin** accounts can't be created through signup; they are seeded.
 - **ESLint** isn't installed in the base version (`next build` still type-checks).
 
 ## Next steps
 
-- **Real OTP**: MSG91 or Twilio Verify behind `OtpProvider`, plus rate limiting per IP and phone.
-- **Storage**: S3 or Cloudinary with signed uploads and image resizing.
+- **OTP hardening**: per-IP rate limiting and a CAPTCHA on the login form.
+- **Storage**: image resizing and thumbnails; signed client uploads for files larger than 4 MB.
 - **Payments and escrow**: milestone-linked payments released on homeowner approval.
 - **Milestone tracking**: site photos and progress updates per milestone (e-monitoring), with delay alerts.
 - **WhatsApp / SMS notifications** via new `NotificationChannel`s.
